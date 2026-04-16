@@ -1,0 +1,175 @@
+#import <Foundation/Foundation.h>
+#import "ChiselWrapper.h"
+#include "chisel.hpp"
+#include "mime_detector.hpp"
+#include <string>
+#include <vector>
+#include <filesystem>
+#include <atomic>
+#include <memory>
+
+@implementation ChiselArchiveNode
+@end
+
+@implementation ChiselWrapper {
+    chisel::ProcessingOptions _options;
+    uint32_t _threads;
+    std::filesystem::path _outputDir;
+    std::atomic<chisel::ProcessorExecutor*> _executor;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        chisel::MimeDetector::ensure_magic_installed();
+        
+        _threads = 4;
+        _executor.store(nullptr);
+    }
+    return self;
+}
+
+- (void)setOptionsWithIterations:(uint32_t)iterations
+                 iterationsLarge:(uint32_t)iterationsLarge
+                       maxTokens:(uint32_t)maxTokens
+                preserveMetadata:(BOOL)preserveMetadata
+                 verifyChecksums:(BOOL)verifyChecksums
+                         threads:(uint32_t)threads
+                 outputDirectory:(NSString *)outputDirectory {
+    
+    _options.iterations = iterations;
+    _options.iterations_large = iterationsLarge;
+    _options.maxTokens = maxTokens;
+    _options.preserve_metadata = preserveMetadata;
+    _options.verify_checksums = verifyChecksums;
+    _threads = threads;
+    
+    if (outputDirectory) {
+        _outputDir = std::filesystem::path([outputDirectory UTF8String]);
+    } else {
+        _outputDir = std::filesystem::path();
+    }
+}
+
+- (void)recompressFiles:(NSArray<NSString *> *)filePaths {
+    chisel::ProcessorRegistry registry;
+    chisel::EventBus bus;
+    
+    __weak ChiselWrapper *weakSelf = self;
+    
+    bus.subscribe<chisel::FileProcessStartEvent>([weakSelf](const chisel::FileProcessStartEvent& e) {
+        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
+        
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onStart) {
+            strongSelf.onStart(nsPath);
+        }
+    });
+    
+    bus.subscribe<chisel::FileProcessCompleteEvent>([weakSelf](const chisel::FileProcessCompleteEvent& e) {
+        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
+        uint64_t origSize = static_cast<uint64_t>(e.original_size);
+        uint64_t finalSize = static_cast<uint64_t>(e.new_size);
+        BOOL replaced = e.replaced ? YES : NO;
+        
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onFinish) {
+            strongSelf.onFinish(nsPath, origSize, finalSize, replaced);
+        }
+    });
+    
+    bus.subscribe<chisel::FileProcessSkippedEvent>([weakSelf](const chisel::FileProcessSkippedEvent& e) {
+        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
+        NSString* nsReason = [NSString stringWithUTF8String:e.reason.c_str()];
+        
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onSkipped) {
+            strongSelf.onSkipped(nsPath, nsReason);
+        }
+    });
+    
+    bus.subscribe<chisel::FileProcessErrorEvent>([weakSelf](const chisel::FileProcessErrorEvent& e) {
+        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
+        NSString* nsError = [NSString stringWithUTF8String:e.error_message.c_str()];
+        
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onError) {
+            strongSelf.onError(nsPath, nsError);
+        }
+    });
+    
+    bus.subscribe<chisel::FileAnalyzeSkippedEvent>([weakSelf](const chisel::FileAnalyzeSkippedEvent& e) {
+        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
+        NSString* nsReason = [NSString stringWithUTF8String:e.reason.c_str()];
+        
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onSkipped) {
+            strongSelf.onSkipped(nsPath, nsReason);
+        }
+    });
+
+    
+    bus.subscribe<chisel::ContainerFinalizeErrorEvent>([weakSelf](const chisel::ContainerFinalizeErrorEvent& e) {
+        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
+        NSString* nsError = [NSString stringWithUTF8String:e.error_message.c_str()];
+        
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onError) {
+            strongSelf.onError(nsPath, nsError);
+        }
+    });
+    
+    bus.subscribe<chisel::ContainerFinalizeCompleteEvent>([weakSelf](const chisel::ContainerFinalizeCompleteEvent& e) {
+        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
+        uint64_t origSize = static_cast<uint64_t>(e.original_size);
+        uint64_t finalSize = static_cast<uint64_t>(e.final_size);
+        BOOL replaced = e.replaced ? YES : NO;
+        
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onFinish) {
+            strongSelf.onFinish(nsPath, origSize, finalSize, replaced);
+        }
+    });
+    
+    std::vector<std::filesystem::path> inputs;
+    inputs.reserve(filePaths.count);
+    for (NSString* path in filePaths) {
+        inputs.push_back(std::filesystem::path([path UTF8String]));
+    }
+    
+    chisel::ProcessorExecutor executor(registry,
+                                       _options,
+                                       chisel::EncodeMode::PIPE,
+                                       false,
+                                       _outputDir,
+                                       bus,
+                                       _threads);
+    
+    _executor.store(&executor);
+    executor.process(inputs);
+    _executor.store(nullptr);
+}
+
+- (void)stop {
+    auto* exec = _executor.load();
+    if (exec) {
+        exec->request_stop();
+    }
+}
+
+- (NSString *)detectMimeType:(NSString *)filePath {
+    std::string mime = chisel::MimeDetector::detect([filePath UTF8String]);
+    return [NSString stringWithUTF8String:mime.c_str()];
+}
+
+- (nullable ChiselArchiveNode *)inspectArchive:(NSString *)archivePath error:(NSError **)error {
+    ChiselArchiveNode *root = [[ChiselArchiveNode alloc] init];
+    root.name = [archivePath lastPathComponent];
+    root.mimeType = [self detectMimeType:archivePath];
+    root.size = 0;
+    root.children = @[];
+    
+    return root;
+}
+
+@end
