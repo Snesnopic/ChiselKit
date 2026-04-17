@@ -56,7 +56,36 @@
     chisel::EventBus bus;
     
     __weak ChiselWrapper *weakSelf = self;
+
+    bus.subscribe<chisel::FileAnalyzeStartEvent>([weakSelf](const chisel::FileAnalyzeStartEvent& e) {
+        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
+        
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onAnalyzeStart) {
+            strongSelf.onAnalyzeStart(nsPath);
+        }
+    });
     
+    bus.subscribe<chisel::FileAnalyzeCompleteEvent>([weakSelf](const chisel::FileAnalyzeCompleteEvent& e) {
+        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
+        BOOL extracted = e.extracted ? YES : NO;
+        NSInteger numChildren = static_cast<NSInteger>(e.num_children);
+        
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onAnalyzeComplete) {
+            strongSelf.onAnalyzeComplete(nsPath, extracted, numChildren);
+        }
+    });
+
+    bus.subscribe<chisel::ContainerFinalizeStartEvent>([weakSelf](const chisel::ContainerFinalizeStartEvent& e) {
+        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
+        
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onFinalizeStart) {
+            strongSelf.onFinalizeStart(nsPath);
+        }
+    });
+
     bus.subscribe<chisel::FileProcessStartEvent>([weakSelf](const chisel::FileProcessStartEvent& e) {
         NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
         

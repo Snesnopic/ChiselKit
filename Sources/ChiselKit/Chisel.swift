@@ -10,10 +10,13 @@ public struct FileNode: Identifiable {
 }
 
 public enum ChiselEvent {
+    case analyzeStart(path: String)
+    case analyzeComplete(path: String, extracted: Bool, numChildren: Int)
     case start(path: String)
     case finish(path: String, sizeBefore: UInt64, sizeAfter: UInt64, replaced: Bool)
     case error(path: String, message: String)
     case skipped(path: String, reason: String)
+    case finalizeStart(path: String)
     case log(tag: String, message: String)
 }
 
@@ -40,18 +43,34 @@ public actor Chisel {
     
     public func process(files: [URL]) -> AsyncStream<ChiselEvent> {
         AsyncStream { continuation in
+            wrapper.onAnalyzeStart = { path in
+                continuation.yield(.analyzeStart(path: path))
+            }
+
+            wrapper.onAnalyzeComplete = { path, extracted, numChildren in
+                continuation.yield(.analyzeComplete(path: path, extracted: extracted, numChildren: numChildren))
+            }
+
+            wrapper.onFinalizeStart = { path in
+                continuation.yield(.finalizeStart(path: path))
+            }
+            
             wrapper.onStart = { path in
                 continuation.yield(.start(path: path))
             }
+            
             wrapper.onFinish = { path, before, after, replaced in
                 continuation.yield(.finish(path: path, sizeBefore: before, sizeAfter: after, replaced: replaced))
             }
+            
             wrapper.onError = { path, error in
                 continuation.yield(.error(path: path, message: error))
             }
+            
             wrapper.onSkipped = { path, reason in
                 continuation.yield(.skipped(path: path, reason: reason))
             }
+            
             wrapper.onLog = { tag, msg in
                 continuation.yield(.log(tag: tag, message: msg))
             }
