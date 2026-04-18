@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "Chisel",
     platforms: [
-        .macOS(.v13), .iOS(.v16)
+        .macOS(.v14), .iOS(.v16), .visionOS(.v1), .tvOS(.v16), .watchOS(.v9)
     ],
     products: [
         .library(

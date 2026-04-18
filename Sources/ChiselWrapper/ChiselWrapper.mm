@@ -191,14 +191,5 @@
     return [NSString stringWithUTF8String:mime.c_str()];
 }
 
-- (nullable ChiselArchiveNode *)inspectArchive:(NSString *)archivePath error:(NSError **)error {
-    ChiselArchiveNode *root = [[ChiselArchiveNode alloc] init];
-    root.name = [archivePath lastPathComponent];
-    root.mimeType = [self detectMimeType:archivePath];
-    root.size = 0;
-    root.children = @[];
-    
-    return root;
-}
 
 @end

@@ -35,7 +35,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)stop;
 
 - (NSString *)detectMimeType:(NSString *)filePath;
-- (nullable ChiselArchiveNode *)inspectArchive:(NSString *)archivePath error:(NSError **)error;
 
 @end
 
