@@ -35,7 +35,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)stop;
 
 - (NSString *)detectMimeType:(NSString *)filePath;
-
+- (NSString *)version;
+- (BOOL)isCompatible:(NSString *)filePath;
+- (NSArray<NSString *> *)supportedExtensions;
+- (NSArray<NSString *> *)supportedMimeTypes;
 @end
 
 NS_ASSUME_NONNULL_END

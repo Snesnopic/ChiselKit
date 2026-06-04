@@ -16,6 +16,7 @@
     uint32_t _threads;
     std::filesystem::path _outputDir;
     std::atomic<chisel::ProcessorExecutor*> _executor;
+    std::unique_ptr<chisel::Chisel> _chiselCore;
 }
 
 - (instancetype)init {
@@ -25,6 +26,7 @@
         
         _threads = 4;
         _executor.store(nullptr);
+        _chiselCore = std::make_unique<chisel::Chisel>();
     }
     return self;
 }
@@ -191,5 +193,44 @@
     return [NSString stringWithUTF8String:mime.c_str()];
 }
 
+- (NSString *)version {
+    auto v = chisel::Chisel::version();
+    return [[NSString alloc] initWithBytes:v.data() length:v.size() encoding:NSUTF8StringEncoding];
+}
+
+- (BOOL)isCompatible:(NSString *)filePath {
+    if (!_chiselCore) return NO;
+    
+    std::filesystem::path path([filePath UTF8String]);
+    return _chiselCore->isCompatible(path) ? YES : NO;
+}
+
+- (NSArray<NSString *> *)supportedExtensions {
+    if (!_chiselCore) return @[];
+    
+    auto exts = _chiselCore->supportedExtensions();
+    NSMutableArray *array = [NSMutableArray arrayWithCapacity:exts.size()];
+    
+    for (const auto& ext : exts) {
+        NSString *nsExt = [[NSString alloc] initWithBytes:ext.data() length:ext.size() encoding:NSUTF8StringEncoding];
+        [array addObject:nsExt];
+    }
+    
+    return array;
+}
+
+- (NSArray<NSString *> *)supportedMimeTypes {
+    if (!_chiselCore) return @[];
+    
+    auto mimes = _chiselCore->supportedMimeTypes();
+    NSMutableArray *array = [NSMutableArray arrayWithCapacity:mimes.size()];
+    
+    for (const auto& mime : mimes) {
+        NSString *nsMime = [[NSString alloc] initWithBytes:mime.data() length:mime.size() encoding:NSUTF8StringEncoding];
+        [array addObject:nsMime];
+    }
+    
+    return array;
+}
 
 @end

@@ -1,7 +1,7 @@
 import Foundation
 import ChiselWrapper
 
-public struct FileNode: Identifiable {
+public struct FileNode: Identifiable, Sendable {
     public let id = UUID()
     public let name: String
     public let mimeType: String
@@ -9,7 +9,7 @@ public struct FileNode: Identifiable {
     public let children: [FileNode]?
 }
 
-public enum ChiselEvent {
+public enum ChiselEvent: Sendable {
     case analyzeStart(path: String)
     case analyzeComplete(path: String, extracted: Bool, numChildren: Int)
     case start(path: String)
@@ -126,5 +126,28 @@ public actor Chisel {
                         mimeType: node.mimeType,
                         size: node.size,
                         children: mappedChildren?.isEmpty == false ? mappedChildren : nil)
+    }
+    
+    /// The current version of the underlying C++ library.
+    public var version: String {
+        return wrapper.version()
+    }
+    
+    /// A list of all file extensions supported by the registered processors.
+    public var supportedExtensions: [String] {
+        return wrapper.supportedExtensions()
+    }
+    
+    /// A list of all MIME types supported by the registered processors.
+    public var supportedMimeTypes: [String] {
+        return wrapper.supportedMimeTypes()
+    }
+
+    /// Checks if a file can be processed by any available processor.
+    ///
+    /// - Parameter file: The URL of the file to check.
+    /// - Returns: `true` if the file is compatible, `false` otherwise.
+    public func isCompatible(file: URL) -> Bool {
+        return wrapper.isCompatible(file.path)
     }
 }
