@@ -28,6 +28,7 @@ NS_ASSUME_NONNULL_BEGIN
                        maxTokens:(uint32_t)maxTokens
                 preserveMetadata:(BOOL)preserveMetadata
                  verifyChecksums:(BOOL)verifyChecksums
+                          dryRun:(BOOL)dryRun
                          threads:(uint32_t)threads
                  outputDirectory:(nullable NSString *)outputDirectory;
 

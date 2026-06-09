@@ -38,6 +38,7 @@ public actor Chisel {
     ///   - maxTokens: The maximum token limit for the compression dictionary. Default is 10000.
     ///   - preserveMetadata: If `true`, filesystem metadata (creation date, permissions) is preserved. Default is `true`.
     ///   - verifyChecksums: If `true`, performs a post-compression integrity check. Default is `false`.
+    ///   - dryRun: If `true`, performs the analysis and compression but discards the output instead of replacing the original file. Default is `false`.
     ///   - threads: The number of concurrent threads to use. Defaults to half of the available logical cores.
     ///   - outputDirectory: An optional URL for the processed files. If `nil`, files are processed in-place.
     public func configure(iterations: UInt32 = 15,
@@ -45,6 +46,7 @@ public actor Chisel {
                           maxTokens: UInt32 = 10000,
                           preserveMetadata: Bool = true,
                           verifyChecksums: Bool = false,
+                          dryRun: Bool = false,
                           threads: UInt32 = UInt32(max(1, ProcessInfo.processInfo.activeProcessorCount / 2)),
                           outputDirectory: URL? = nil) {
         wrapper.setOptionsWithIterations(iterations,
@@ -52,6 +54,7 @@ public actor Chisel {
                                          maxTokens: maxTokens,
                                          preserveMetadata: preserveMetadata,
                                          verifyChecksums: verifyChecksums,
+                                         dryRun: dryRun,
                                          threads: threads,
                                          outputDirectory: outputDirectory?.path)
     }

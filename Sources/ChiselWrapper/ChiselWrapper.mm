@@ -17,6 +17,7 @@
     std::filesystem::path _outputDir;
     std::atomic<chisel::ProcessorExecutor*> _executor;
     std::unique_ptr<chisel::Chisel> _chiselCore;
+    bool _dryRun;
 }
 
 - (instancetype)init {
@@ -27,6 +28,7 @@
         _threads = 4;
         _executor.store(nullptr);
         _chiselCore = std::make_unique<chisel::Chisel>();
+        _dryRun = false;
     }
     return self;
 }
@@ -36,6 +38,7 @@
                        maxTokens:(uint32_t)maxTokens
                 preserveMetadata:(BOOL)preserveMetadata
                  verifyChecksums:(BOOL)verifyChecksums
+                          dryRun:(BOOL)dryRun
                          threads:(uint32_t)threads
                  outputDirectory:(NSString *)outputDirectory {
     
@@ -45,6 +48,7 @@
     _options.preserve_metadata = preserveMetadata;
     _options.verify_checksums = verifyChecksums;
     _threads = threads;
+    _dryRun = dryRun ? true : false;
     
     if (outputDirectory) {
         _outputDir = std::filesystem::path([outputDirectory UTF8String]);
@@ -171,7 +175,7 @@
     chisel::ProcessorExecutor executor(registry,
                                        _options,
                                        chisel::EncodeMode::PIPE,
-                                       false,
+                                       _dryRun,
                                        _outputDir,
                                        bus,
                                        _threads);
