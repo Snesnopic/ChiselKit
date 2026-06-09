@@ -1,22 +1,47 @@
 import Foundation
 import ChiselWrapper
 
+/// Represents an internal file structure, often extracted from a container archive.
 public struct FileNode: Identifiable, Sendable {
     public let id = UUID()
+    
+    /// The filename.
     public let name: String
+    
+    /// The detected MIME type of the file.
     public let mimeType: String
+    
+    /// The uncompressed size of the file in bytes.
     public let size: UInt64
+    
+    /// Children nodes if this file is itself a nested container.
     public let children: [FileNode]?
 }
 
+/// Represents a lifecycle event emitted by the C++ engine during processing.
 public enum ChiselEvent: Sendable {
+    /// Emitted when the engine starts analyzing a container file.
     case analyzeStart(path: String)
+    
+    /// Emitted when analysis is complete. Contains extraction details.
     case analyzeComplete(path: String, extracted: Bool, numChildren: Int)
+    
+    /// Emitted right before a file compression begins.
     case start(path: String)
+    
+    /// Emitted when compression finishes, reporting size changes.
     case finish(path: String, sizeBefore: UInt64, sizeAfter: UInt64, replaced: Bool)
+    
+    /// Emitted if an error halts the processing of a specific file.
     case error(path: String, message: String)
+    
+    /// Emitted if a file is intentionally skipped (e.g. no gain, unsupported).
     case skipped(path: String, reason: String)
+    
+    /// Emitted when an extracted container is being re-assembled.
     case finalizeStart(path: String)
+    
+    /// A generic log message from the C++ core.
     case log(tag: String, message: String)
 }
 
