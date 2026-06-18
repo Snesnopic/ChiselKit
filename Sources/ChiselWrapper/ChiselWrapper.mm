@@ -23,7 +23,6 @@
 - (instancetype)init {
     self = [super init];
     if (self) {
-        chisel::MimeDetector::ensure_magic_installed();
         
         _threads = 4;
         _executor.store(nullptr);
