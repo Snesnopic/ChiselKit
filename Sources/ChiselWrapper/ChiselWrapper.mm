@@ -7,6 +7,9 @@
 #include <filesystem>
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <unordered_map>
+#include <optional>
 
 @implementation ChiselArchiveNode
 @end
@@ -59,8 +62,16 @@
 - (void)recompressFiles:(NSArray<NSString *> *)filePaths {
     chisel::ProcessorRegistry registry;
     chisel::EventBus bus;
-    
+
     __weak ChiselWrapper *weakSelf = self;
+
+    // chisel only attaches parent_container to Start/Complete events (Phase 2).
+    // Error/Skipped events lack it, so we remember it here (keyed by path) as soon
+    // as it becomes available via Start, and reuse it for the later Error/Skipped
+    // of the same path. Scoped to this call; multiple pool threads write different
+    // keys concurrently, hence the mutex.
+    std::unordered_map<std::string, std::string> parentCache;
+    std::mutex parentCacheMutex;
 
     bus.subscribe<chisel::FileAnalyzeStartEvent>([weakSelf](const chisel::FileAnalyzeStartEvent& e) {
         NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
@@ -91,12 +102,23 @@
         }
     });
 
-    bus.subscribe<chisel::FileProcessStartEvent>([weakSelf](const chisel::FileProcessStartEvent& e) {
+    bus.subscribe<chisel::FileProcessStartEvent>([weakSelf, &parentCache, &parentCacheMutex](const chisel::FileProcessStartEvent& e) {
         NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-        
+        NSString* nsParent = nil;
+
+        if (e.parent_container) {
+            std::string parentStr = e.parent_container->string();
+            nsParent = [NSString stringWithUTF8String:parentStr.c_str()];
+
+            std::lock_guard<std::mutex> lock(parentCacheMutex);
+            parentCache[e.path.string()] = parentStr;
+        }
+
+        BOOL isContainer = e.is_container ? YES : NO;
+
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onStart) {
-            strongSelf.onStart(nsPath);
+            strongSelf.onStart(nsPath, nsParent, isContainer);
         }
     });
     
@@ -105,40 +127,65 @@
         uint64_t origSize = static_cast<uint64_t>(e.original_size);
         uint64_t finalSize = static_cast<uint64_t>(e.new_size);
         BOOL replaced = e.replaced ? YES : NO;
-        
+
+        NSString* nsParent = nil;
+        if (e.parent_container) {
+            nsParent = [NSString stringWithUTF8String:e.parent_container->string().c_str()];
+        }
+        BOOL isContainer = e.is_container ? YES : NO;
+
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onFinish) {
-            strongSelf.onFinish(nsPath, origSize, finalSize, replaced);
+            strongSelf.onFinish(nsPath, origSize, finalSize, replaced, nsParent, isContainer);
         }
     });
     
-    bus.subscribe<chisel::FileProcessSkippedEvent>([weakSelf](const chisel::FileProcessSkippedEvent& e) {
+    bus.subscribe<chisel::FileProcessSkippedEvent>([weakSelf, &parentCache, &parentCacheMutex](const chisel::FileProcessSkippedEvent& e) {
         NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
         NSString* nsReason = [NSString stringWithUTF8String:e.reason.c_str()];
-        
+        NSString* nsParent = nil;
+        {
+            std::lock_guard<std::mutex> lock(parentCacheMutex);
+            auto it = parentCache.find(e.path.string());
+            if (it != parentCache.end()) {
+                nsParent = [NSString stringWithUTF8String:it->second.c_str()];
+            }
+        }
+        BOOL isContainer = e.is_container ? YES : NO;
+
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onSkipped) {
-            strongSelf.onSkipped(nsPath, nsReason);
+            strongSelf.onSkipped(nsPath, nsReason, nsParent, isContainer);
         }
     });
     
-    bus.subscribe<chisel::FileProcessErrorEvent>([weakSelf](const chisel::FileProcessErrorEvent& e) {
+    bus.subscribe<chisel::FileProcessErrorEvent>([weakSelf, &parentCache, &parentCacheMutex](const chisel::FileProcessErrorEvent& e) {
         NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
         NSString* nsError = [NSString stringWithUTF8String:e.error_message.c_str()];
-        
+        NSString* nsParent = nil;
+        {
+            std::lock_guard<std::mutex> lock(parentCacheMutex);
+            auto it = parentCache.find(e.path.string());
+            if (it != parentCache.end()) {
+                nsParent = [NSString stringWithUTF8String:it->second.c_str()];
+            }
+        }
+        BOOL isContainer = e.is_container ? YES : NO;
+
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onError) {
-            strongSelf.onError(nsPath, nsError);
+            strongSelf.onError(nsPath, nsError, nsParent, isContainer);
         }
     });
     
     bus.subscribe<chisel::FileAnalyzeSkippedEvent>([weakSelf](const chisel::FileAnalyzeSkippedEvent& e) {
         NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
         NSString* nsReason = [NSString stringWithUTF8String:e.reason.c_str()];
-        
+
+        // analysis-phase (Phase 1) skips: chisel doesn't attach parent_container/is_container here yet
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onSkipped) {
-            strongSelf.onSkipped(nsPath, nsReason);
+            strongSelf.onSkipped(nsPath, nsReason, nil, NO);
         }
     });
 
@@ -146,22 +193,23 @@
     bus.subscribe<chisel::ContainerFinalizeErrorEvent>([weakSelf](const chisel::ContainerFinalizeErrorEvent& e) {
         NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
         NSString* nsError = [NSString stringWithUTF8String:e.error_message.c_str()];
-        
+
+        // container finalization (Phase 3) is always the container's own file; it has no parent_container/is_container fields
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onError) {
-            strongSelf.onError(nsPath, nsError);
+            strongSelf.onError(nsPath, nsError, nil, NO);
         }
     });
-    
+
     bus.subscribe<chisel::ContainerFinalizeCompleteEvent>([weakSelf](const chisel::ContainerFinalizeCompleteEvent& e) {
         NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
         uint64_t origSize = static_cast<uint64_t>(e.original_size);
         uint64_t finalSize = static_cast<uint64_t>(e.final_size);
         BOOL replaced = e.replaced ? YES : NO;
-        
+
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onFinish) {
-            strongSelf.onFinish(nsPath, origSize, finalSize, replaced);
+            strongSelf.onFinish(nsPath, origSize, finalSize, replaced, nil, NO);
         }
     });
     
@@ -180,7 +228,20 @@
                                        _threads);
     
     _executor.store(&executor);
-    executor.process(inputs);
+    try {
+        executor.process(inputs);
+    } catch (const std::exception& e) {
+        NSString* nsError = [NSString stringWithUTF8String:e.what()];
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onLog) {
+            strongSelf.onLog(@"Executor", [NSString stringWithFormat:@"Uncaught engine exception: %@", nsError]);
+        }
+    } catch (...) {
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onLog) {
+            strongSelf.onLog(@"Executor", @"Uncaught unknown engine exception");
+        }
+    }
     _executor.store(nullptr);
 }
 

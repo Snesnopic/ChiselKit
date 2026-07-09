@@ -27,16 +27,18 @@ public enum ChiselEvent: Sendable {
     case analyzeComplete(path: String, extracted: Bool, numChildren: Int)
     
     /// Emitted right before a file compression begins.
-    case start(path: String)
-    
+    /// - parentContainer: path of the container this file was extracted from, if any.
+    /// - isContainer: true if this refers to the container's own recompression, not one of its extracted children.
+    case start(path: String, parentContainer: String?, isContainer: Bool)
+
     /// Emitted when compression finishes, reporting size changes.
-    case finish(path: String, sizeBefore: UInt64, sizeAfter: UInt64, replaced: Bool)
-    
+    case finish(path: String, sizeBefore: UInt64, sizeAfter: UInt64, replaced: Bool, parentContainer: String?, isContainer: Bool)
+
     /// Emitted if an error halts the processing of a specific file.
-    case error(path: String, message: String)
-    
+    case error(path: String, message: String, parentContainer: String?, isContainer: Bool)
+
     /// Emitted if a file is intentionally skipped (e.g. no gain, unsupported).
-    case skipped(path: String, reason: String)
+    case skipped(path: String, reason: String, parentContainer: String?, isContainer: Bool)
     
     /// Emitted when an extracted container is being re-assembled.
     case finalizeStart(path: String)
@@ -105,20 +107,20 @@ public actor Chisel {
                 continuation.yield(.finalizeStart(path: path))
             }
             
-            wrapper.onStart = { path in
-                continuation.yield(.start(path: path))
+            wrapper.onStart = { path, parentContainer, isContainer in
+                continuation.yield(.start(path: path, parentContainer: parentContainer, isContainer: isContainer))
             }
-            
-            wrapper.onFinish = { path, before, after, replaced in
-                continuation.yield(.finish(path: path, sizeBefore: before, sizeAfter: after, replaced: replaced))
+
+            wrapper.onFinish = { path, before, after, replaced, parentContainer, isContainer in
+                continuation.yield(.finish(path: path, sizeBefore: before, sizeAfter: after, replaced: replaced, parentContainer: parentContainer, isContainer: isContainer))
             }
-            
-            wrapper.onError = { path, error in
-                continuation.yield(.error(path: path, message: error))
+
+            wrapper.onError = { path, error, parentContainer, isContainer in
+                continuation.yield(.error(path: path, message: error, parentContainer: parentContainer, isContainer: isContainer))
             }
-            
-            wrapper.onSkipped = { path, reason in
-                continuation.yield(.skipped(path: path, reason: reason))
+
+            wrapper.onSkipped = { path, reason, parentContainer, isContainer in
+                continuation.yield(.skipped(path: path, reason: reason, parentContainer: parentContainer, isContainer: isContainer))
             }
             
             wrapper.onLog = { tag, msg in

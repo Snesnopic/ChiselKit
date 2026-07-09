@@ -17,10 +17,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) void (^onAnalyzeStart)(NSString *path);
 @property (nonatomic, copy, nullable) void (^onAnalyzeComplete)(NSString *path, BOOL extracted, NSInteger numChildren);
 @property (nonatomic, copy, nullable) void (^onFinalizeStart)(NSString *path);
-@property (nonatomic, copy, nullable) void (^onStart)(NSString *path);
-@property (nonatomic, copy, nullable) void (^onFinish)(NSString *path, uint64_t sizeBefore, uint64_t sizeAfter, BOOL replaced);
-@property (nonatomic, copy, nullable) void (^onError)(NSString *path, NSString *error);
-@property (nonatomic, copy, nullable) void (^onSkipped)(NSString *path, NSString *reason);
+@property (nonatomic, copy, nullable) void (^onStart)(NSString *path, NSString * _Nullable parentContainer, BOOL isContainer);
+@property (nonatomic, copy, nullable) void (^onFinish)(NSString *path, uint64_t sizeBefore, uint64_t sizeAfter, BOOL replaced, NSString * _Nullable parentContainer, BOOL isContainer);
+@property (nonatomic, copy, nullable) void (^onError)(NSString *path, NSString *error, NSString * _Nullable parentContainer, BOOL isContainer);
+@property (nonatomic, copy, nullable) void (^onSkipped)(NSString *path, NSString *reason, NSString * _Nullable parentContainer, BOOL isContainer);
 @property (nonatomic, copy, nullable) void (^onLog)(NSString *tag, NSString *message);
 
 - (void)setOptionsWithIterations:(uint32_t)iterations
