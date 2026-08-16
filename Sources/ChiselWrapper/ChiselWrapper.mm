@@ -2,6 +2,8 @@
 #import "ChiselWrapper.h"
 #include "chisel.hpp"
 #include "mime_detector.hpp"
+#include "logger.hpp"
+#include "log_sink.hpp"
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -10,6 +12,54 @@
 #include <mutex>
 #include <unordered_map>
 #include <optional>
+
+namespace {
+
+// forwards chisel's internal Logger messages (processor-level warnings/errors,
+// e.g. "Missing colormap for palette tiff") to the onLog block. Distinct from
+// the EventBus-based events above: this is chisel's own diagnostic logging,
+// which otherwise has no registered sink and is silently dropped.
+class BlockLogSink final : public chisel::ILogSink {
+public:
+    explicit BlockLogSink(void (^onLog)(NSString *, NSString *, NSString *)) : onLog_(onLog) {}
+
+    void log(chisel::LogLevel level, std::string_view message, std::string_view tag) override {
+        if (!onLog_) return;
+
+        NSString *nsTag = [[NSString alloc] initWithBytes:tag.data() length:tag.size() encoding:NSUTF8StringEncoding];
+        NSString *nsMessage = [[NSString alloc] initWithBytes:message.data() length:message.size() encoding:NSUTF8StringEncoding];
+        NSString *nsLevel = [NSString stringWithUTF8String:chisel::Logger::level_to_string(level)];
+        onLog_(nsTag, nsMessage, nsLevel);
+    }
+
+private:
+    void (^onLog_)(NSString *, NSString *, NSString *);
+};
+
+// Logger is a process-wide static facade, not scoped to a single recompressFiles:
+// call, so the sink must be explicitly unregistered when this call ends (success
+// or exception) - otherwise it stays registered forever and every future call
+// would deliver messages to this same (by-then-stale) block too.
+class ScopedLogSink final {
+public:
+    explicit ScopedLogSink(void (^onLog)(NSString *, NSString *, NSString *)) {
+        auto sink = std::make_unique<BlockLogSink>(onLog);
+        ptr_ = sink.get();
+        chisel::Logger::add_sink(std::move(sink));
+    }
+
+    ~ScopedLogSink() {
+        chisel::Logger::remove_sink(ptr_);
+    }
+
+    ScopedLogSink(const ScopedLogSink &) = delete;
+    ScopedLogSink &operator=(const ScopedLogSink &) = delete;
+
+private:
+    chisel::ILogSink *ptr_ = nullptr;
+};
+
+} // namespace
 
 @implementation ChiselArchiveNode
 @end
@@ -64,6 +114,9 @@
     chisel::EventBus bus;
 
     __weak ChiselWrapper *weakSelf = self;
+
+    // registered for the duration of this call only; see ScopedLogSink's dtor.
+    ScopedLogSink logSink(self.onLog);
 
     // chisel only attaches parent_container to Start/Complete events (Phase 2).
     // Error/Skipped events lack it, so we remember it here (keyed by path) as soon
@@ -234,12 +287,12 @@
         NSString* nsError = [NSString stringWithUTF8String:e.what()];
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onLog) {
-            strongSelf.onLog(@"Executor", [NSString stringWithFormat:@"Uncaught engine exception: %@", nsError]);
+            strongSelf.onLog(@"Executor", [NSString stringWithFormat:@"Uncaught engine exception: %@", nsError], @"ERROR");
         }
     } catch (...) {
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onLog) {
-            strongSelf.onLog(@"Executor", @"Uncaught unknown engine exception");
+            strongSelf.onLog(@"Executor", @"Uncaught unknown engine exception", @"ERROR");
         }
     }
     _executor.store(nullptr);

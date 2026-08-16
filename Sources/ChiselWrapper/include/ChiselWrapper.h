@@ -21,7 +21,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) void (^onFinish)(NSString *path, uint64_t sizeBefore, uint64_t sizeAfter, BOOL replaced, NSString * _Nullable parentContainer, BOOL isContainer);
 @property (nonatomic, copy, nullable) void (^onError)(NSString *path, NSString *error, NSString * _Nullable parentContainer, BOOL isContainer);
 @property (nonatomic, copy, nullable) void (^onSkipped)(NSString *path, NSString *reason, NSString * _Nullable parentContainer, BOOL isContainer);
-@property (nonatomic, copy, nullable) void (^onLog)(NSString *tag, NSString *message);
+@property (nonatomic, copy, nullable) void (^onLog)(NSString *tag, NSString *message, NSString *level);
 
 - (void)setOptionsWithIterations:(uint32_t)iterations
                  iterationsLarge:(uint32_t)iterationsLarge

@@ -43,8 +43,9 @@ public enum ChiselEvent: Sendable {
     /// Emitted when an extracted container is being re-assembled.
     case finalizeStart(path: String)
     
-    /// A generic log message from the C++ core.
-    case log(tag: String, message: String)
+    /// A generic log message from the C++ core (either the EventBus-driven
+    /// pipeline logs, or chisel's own internal Logger diagnostics).
+    case log(tag: String, message: String, level: String)
 }
 
 /// The main concurrency-safe interface for the Chisel optimization engine.
@@ -123,8 +124,8 @@ public actor Chisel {
                 continuation.yield(.skipped(path: path, reason: reason, parentContainer: parentContainer, isContainer: isContainer))
             }
             
-            wrapper.onLog = { tag, msg in
-                continuation.yield(.log(tag: tag, message: msg))
+            wrapper.onLog = { tag, msg, level in
+                continuation.yield(.log(tag: tag, message: msg, level: level))
             }
             
             let paths = files.map { $0.path }
