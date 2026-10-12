@@ -87,16 +87,14 @@ private:
 
 - (void)setOptionsWithIterations:(uint32_t)iterations
                  iterationsLarge:(uint32_t)iterationsLarge
-                       maxTokens:(uint32_t)maxTokens
                 preserveMetadata:(BOOL)preserveMetadata
                  verifyChecksums:(BOOL)verifyChecksums
                           dryRun:(BOOL)dryRun
                          threads:(uint32_t)threads
                  outputDirectory:(NSString *)outputDirectory {
-    
+
     _options.iterations = iterations;
     _options.iterations_large = iterationsLarge;
-    _options.maxTokens = maxTokens;
     _options.preserve_metadata = preserveMetadata;
     _options.verify_checksums = verifyChecksums;
     _threads = threads;
@@ -143,6 +141,20 @@ private:
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onAnalyzeComplete) {
             strongSelf.onAnalyzeComplete(nsPath, extracted, numChildren);
+        }
+    });
+
+    bus.subscribe<chisel::FileAnalyzeErrorEvent>([weakSelf](const chisel::FileAnalyzeErrorEvent& e) {
+        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
+        NSString* nsError = [NSString stringWithUTF8String:e.error_message.c_str()];
+
+        // Phase 1 (analysis) errors: a pure container (can_recompress() == false) whose
+        // extraction failed with no fallback - without this, the file would silently
+        // vanish (stuck at whatever status .analyzeStart last set, forever). Always
+        // refers to the container itself; chisel doesn't attach parent_container/is_container here.
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onError) {
+            strongSelf.onError(nsPath, nsError, nil, NO);
         }
     });
 

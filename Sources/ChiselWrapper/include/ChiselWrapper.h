@@ -25,7 +25,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)setOptionsWithIterations:(uint32_t)iterations
                  iterationsLarge:(uint32_t)iterationsLarge
-                       maxTokens:(uint32_t)maxTokens
                 preserveMetadata:(BOOL)preserveMetadata
                  verifyChecksums:(BOOL)verifyChecksums
                           dryRun:(BOOL)dryRun
