@@ -15,18 +15,19 @@ NS_ASSUME_NONNULL_BEGIN
 @interface ChiselWrapper : NSObject
 
 @property (nonatomic, copy, nullable) void (^onAnalyzeStart)(NSString *path);
-@property (nonatomic, copy, nullable) void (^onAnalyzeComplete)(NSString *path, BOOL extracted, NSInteger numChildren);
+@property (nonatomic, copy, nullable) void (^onAnalyzeComplete)(NSString *path, BOOL extracted, NSInteger numChildren, NSString * _Nullable parentContainer);
 @property (nonatomic, copy, nullable) void (^onFinalizeStart)(NSString *path);
 @property (nonatomic, copy, nullable) void (^onStart)(NSString *path, NSString * _Nullable parentContainer, BOOL isContainer);
 @property (nonatomic, copy, nullable) void (^onFinish)(NSString *path, uint64_t sizeBefore, uint64_t sizeAfter, BOOL replaced, NSString * _Nullable parentContainer, BOOL isContainer);
 @property (nonatomic, copy, nullable) void (^onError)(NSString *path, NSString *error, NSString * _Nullable parentContainer, BOOL isContainer);
-@property (nonatomic, copy, nullable) void (^onSkipped)(NSString *path, NSString *reason, NSString * _Nullable parentContainer, BOOL isContainer);
+@property (nonatomic, copy, nullable) void (^onSkipped)(NSString *path, NSString *reason, NSString * _Nullable parentContainer, BOOL isContainer, BOOL isSigned);
 @property (nonatomic, copy, nullable) void (^onLog)(NSString *tag, NSString *message, NSString *level);
 
 - (void)setOptionsWithIterations:(uint32_t)iterations
                  iterationsLarge:(uint32_t)iterationsLarge
                 preserveMetadata:(BOOL)preserveMetadata
                  verifyChecksums:(BOOL)verifyChecksums
+                 breakSignatures:(BOOL)breakSignatures
                           dryRun:(BOOL)dryRun
                          threads:(uint32_t)threads
                  outputDirectory:(nullable NSString *)outputDirectory;

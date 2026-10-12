@@ -15,8 +15,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "libchisel",
-            url: "https://github.com/Snesnopic/chisel/releases/download/v1.11.0/Chisel.xcframework.zip",
-            checksum: "d4c56a69712cb72ad419c24c69811e7e5784f753293ae53c425c409d4b93c3e4"
+            url: "https://github.com/Snesnopic/chisel/releases/download/v1.12.0/Chisel.xcframework.zip",
+            checksum: "fe366ecd7eae452e1fda6b8734ce1bc387095b23fe4e65da2a485d2fdc570be0"
         ),
         
         .target(
@@ -26,6 +26,9 @@ let package = Package(
             publicHeadersPath: "include",
             cxxSettings: [
                 .unsafeFlags(["-std=c++20"])
+            ],
+            linkerSettings: [
+                .linkedLibrary("iconv")
             ]
         ),
         

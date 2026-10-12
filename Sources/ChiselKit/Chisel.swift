@@ -24,7 +24,8 @@ public enum ChiselEvent: Sendable {
     case analyzeStart(path: String)
     
     /// Emitted when analysis is complete. Contains extraction details.
-    case analyzeComplete(path: String, extracted: Bool, numChildren: Int)
+    /// - parentContainer: path of the container this file was extracted from, if any.
+    case analyzeComplete(path: String, extracted: Bool, numChildren: Int, parentContainer: String?)
     
     /// Emitted right before a file compression begins.
     /// - parentContainer: path of the container this file was extracted from, if any.
@@ -38,7 +39,8 @@ public enum ChiselEvent: Sendable {
     case error(path: String, message: String, parentContainer: String?, isContainer: Bool)
 
     /// Emitted if a file is intentionally skipped (e.g. no gain, unsupported).
-    case skipped(path: String, reason: String, parentContainer: String?, isContainer: Bool)
+    /// - isSigned: true if the file was left untouched to keep its digital signature valid.
+    case skipped(path: String, reason: String, parentContainer: String?, isContainer: Bool, isSigned: Bool)
     
     /// Emitted when an extracted container is being re-assembled.
     case finalizeStart(path: String)
@@ -65,6 +67,7 @@ public actor Chisel {
     ///   - iterationsLarge: The number of optimization passes for large files. Default is 5.
     ///   - preserveMetadata: If `true`, filesystem metadata (creation date, permissions) is preserved. Default is `true`.
     ///   - verifyChecksums: If `true`, performs a post-compression integrity check. Default is `false`.
+    ///   - breakSignatures: If `true`, digitally signed files are optimized too, invalidating their signatures. Default is `false` (they are skipped).
     ///   - dryRun: If `true`, performs the analysis and compression but discards the output instead of replacing the original file. Default is `false`.
     ///   - threads: The number of concurrent threads to use. Defaults to half of the available logical cores.
     ///   - outputDirectory: An optional URL for the processed files. If `nil`, files are processed in-place.
@@ -72,6 +75,7 @@ public actor Chisel {
                           iterationsLarge: UInt32 = 5,
                           preserveMetadata: Bool = true,
                           verifyChecksums: Bool = false,
+                          breakSignatures: Bool = false,
                           dryRun: Bool = false,
                           threads: UInt32 = UInt32(max(1, ProcessInfo.processInfo.activeProcessorCount / 2)),
                           outputDirectory: URL? = nil) {
@@ -79,6 +83,7 @@ public actor Chisel {
                                          iterationsLarge: iterationsLarge,
                                          preserveMetadata: preserveMetadata,
                                          verifyChecksums: verifyChecksums,
+                                         breakSignatures: breakSignatures,
                                          dryRun: dryRun,
                                          threads: threads,
                                          outputDirectory: outputDirectory?.path)
@@ -97,8 +102,8 @@ public actor Chisel {
                 continuation.yield(.analyzeStart(path: path))
             }
 
-            wrapper.onAnalyzeComplete = { path, extracted, numChildren in
-                continuation.yield(.analyzeComplete(path: path, extracted: extracted, numChildren: numChildren))
+            wrapper.onAnalyzeComplete = { path, extracted, numChildren, parentContainer in
+                continuation.yield(.analyzeComplete(path: path, extracted: extracted, numChildren: numChildren, parentContainer: parentContainer))
             }
 
             wrapper.onFinalizeStart = { path in
@@ -117,8 +122,8 @@ public actor Chisel {
                 continuation.yield(.error(path: path, message: error, parentContainer: parentContainer, isContainer: isContainer))
             }
 
-            wrapper.onSkipped = { path, reason, parentContainer, isContainer in
-                continuation.yield(.skipped(path: path, reason: reason, parentContainer: parentContainer, isContainer: isContainer))
+            wrapper.onSkipped = { path, reason, parentContainer, isContainer, isSigned in
+                continuation.yield(.skipped(path: path, reason: reason, parentContainer: parentContainer, isContainer: isContainer, isSigned: isSigned))
             }
             
             wrapper.onLog = { tag, msg, level in
