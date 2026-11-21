@@ -18,6 +18,46 @@ public struct FileNode: Identifiable, Sendable {
     public let children: [FileNode]?
 }
 
+/// Why the engine left a file as it was.
+public enum SkipReason: Sendable {
+    /// A system or metadata file, e.g. .DS_Store or Thumbs.db.
+    case junk
+    /// The file is zero bytes long.
+    case empty
+    /// No processor handles its format.
+    case unsupported
+    /// Left untouched to keep its digital signature valid.
+    case signed
+    /// Found inside more containers than allowed.
+    case nestingTooDeep
+    /// Its processor can't recompress it and found nothing inside it.
+    case nothingToDo
+    /// Recompressing it gave nothing smaller.
+    case noImprovement
+    /// A stop was requested before it was done.
+    case interrupted
+    /// It would be replaced in place, but it or its folder can't be written.
+    case readOnly
+    /// Something else changed it while it was being processed.
+    case changedDuringRun
+
+    init(_ reason: ChiselSkipReason) {
+        switch reason {
+        case .junk: self = .junk
+        case .empty: self = .empty
+        case .unsupported: self = .unsupported
+        case .signed: self = .signed
+        case .nestingTooDeep: self = .nestingTooDeep
+        case .nothingToDo: self = .nothingToDo
+        case .noImprovement: self = .noImprovement
+        case .interrupted: self = .interrupted
+        case .readOnly: self = .readOnly
+        case .changedDuringRun: self = .changedDuringRun
+        @unknown default: self = .unsupported
+        }
+    }
+}
+
 /// Represents a lifecycle event emitted by the C++ engine during processing.
 public enum ChiselEvent: Sendable {
     /// Emitted when the engine starts analyzing a container file.
@@ -38,9 +78,9 @@ public enum ChiselEvent: Sendable {
     /// Emitted if an error halts the processing of a specific file.
     case error(path: String, message: String, parentContainer: String?, isContainer: Bool)
 
-    /// Emitted if a file is intentionally skipped (e.g. no gain, unsupported).
-    /// - isSigned: true if the file was left untouched to keep its digital signature valid.
-    case skipped(path: String, reason: String, parentContainer: String?, isContainer: Bool, isSigned: Bool)
+    /// Emitted if a file is left as it was (e.g. no gain, unsupported), or a container isn't rebuilt.
+    /// - message: the reason as text, for display.
+    case skipped(path: String, reason: SkipReason, message: String, parentContainer: String?, isContainer: Bool)
     
     /// Emitted when an extracted container is being re-assembled.
     case finalizeStart(path: String)
@@ -65,7 +105,7 @@ public actor Chisel {
     /// - Parameters:
     ///   - iterations: The number of optimization passes for standard files. Default is 15.
     ///   - iterationsLarge: The number of optimization passes for large files. Default is 5.
-    ///   - preserveMetadata: If `true`, filesystem metadata (creation date, permissions) is preserved. Default is `true`.
+    ///   - preserveMetadata: If `false`, processors drop the metadata inside the files they rewrite, such as Vorbis and Opus comments and MP3 text tags (cover art stays). Default is `true`.
     ///   - verifyChecksums: If `true`, performs a post-compression integrity check. Default is `false`.
     ///   - breakSignatures: If `true`, digitally signed files are optimized too, invalidating their signatures. Default is `false` (they are skipped).
     ///   - dryRun: If `true`, performs the analysis and compression but discards the output instead of replacing the original file. Default is `false`.
@@ -122,8 +162,8 @@ public actor Chisel {
                 continuation.yield(.error(path: path, message: error, parentContainer: parentContainer, isContainer: isContainer))
             }
 
-            wrapper.onSkipped = { path, reason, parentContainer, isContainer, isSigned in
-                continuation.yield(.skipped(path: path, reason: reason, parentContainer: parentContainer, isContainer: isContainer, isSigned: isSigned))
+            wrapper.onSkipped = { path, reason, message, parentContainer, isContainer in
+                continuation.yield(.skipped(path: path, reason: SkipReason(reason), message: message, parentContainer: parentContainer, isContainer: isContainer))
             }
             
             wrapper.onLog = { tag, msg, level in

@@ -9,8 +9,6 @@
 #include <filesystem>
 #include <atomic>
 #include <memory>
-#include <mutex>
-#include <unordered_map>
 #include <optional>
 
 namespace {
@@ -58,6 +56,34 @@ public:
 private:
     chisel::ILogSink *ptr_ = nullptr;
 };
+
+NSString* NSStringFromPath(const std::filesystem::path& path) {
+    return [NSString stringWithUTF8String:path.string().c_str()];
+}
+
+NSString* _Nullable NSStringFromPath(const std::optional<std::filesystem::path>& path) {
+    return path ? NSStringFromPath(*path) : nil;
+}
+
+NSString* NSStringFromText(const std::string& text) {
+    return [NSString stringWithUTF8String:text.c_str()];
+}
+
+ChiselSkipReason ToChiselSkipReason(chisel::SkipReason reason) {
+    switch (reason) {
+        case chisel::SkipReason::Junk: return ChiselSkipReasonJunk;
+        case chisel::SkipReason::Empty: return ChiselSkipReasonEmpty;
+        case chisel::SkipReason::Unsupported: return ChiselSkipReasonUnsupported;
+        case chisel::SkipReason::Signed: return ChiselSkipReasonSigned;
+        case chisel::SkipReason::NestingTooDeep: return ChiselSkipReasonNestingTooDeep;
+        case chisel::SkipReason::NothingToDo: return ChiselSkipReasonNothingToDo;
+        case chisel::SkipReason::NoImprovement: return ChiselSkipReasonNoImprovement;
+        case chisel::SkipReason::Interrupted: return ChiselSkipReasonInterrupted;
+        case chisel::SkipReason::ReadOnly: return ChiselSkipReasonReadOnly;
+        case chisel::SkipReason::ChangedDuringRun: return ChiselSkipReasonChangedDuringRun;
+    }
+    return ChiselSkipReasonUnsupported;
+}
 
 } // namespace
 
@@ -118,167 +144,100 @@ private:
     // registered for the duration of this call only; see ScopedLogSink's dtor.
     ScopedLogSink logSink(self.onLog);
 
-    // chisel attaches the parent container to FileAnalyzeComplete and to Phase 2's
-    // Start/Complete, but not to Error/Skipped events. We remember it here (keyed by
-    // path) as soon as analysis reports it, so a Skipped/Error that arrives without
-    // a Start (e.g. "Interrupted" after a stop) is still attributed. Scoped to this
-    // call; pool threads write concurrently, hence the mutex.
-    std::unordered_map<std::string, std::string> parentCache;
-    std::mutex parentCacheMutex;
-
-    auto cachedParent = [&parentCache, &parentCacheMutex](const std::filesystem::path& path) -> NSString* {
-        std::lock_guard<std::mutex> lock(parentCacheMutex);
-        auto it = parentCache.find(path.string());
-        return it != parentCache.end() ? [NSString stringWithUTF8String:it->second.c_str()] : nil;
-    };
-
     bus.subscribe<chisel::FileAnalyzeStartEvent>([weakSelf](const chisel::FileAnalyzeStartEvent& e) {
-        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onAnalyzeStart) {
-            strongSelf.onAnalyzeStart(nsPath);
+            strongSelf.onAnalyzeStart(NSStringFromPath(e.path));
         }
     });
 
-    bus.subscribe<chisel::FileAnalyzeCompleteEvent>([weakSelf, &parentCache, &parentCacheMutex](const chisel::FileAnalyzeCompleteEvent& e) {
-        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-        BOOL extracted = e.extracted ? YES : NO;
-        NSInteger numChildren = static_cast<NSInteger>(e.num_children);
-        NSString* nsParent = nil;
-
-        if (e.parent) {
-            std::string parentStr = e.parent->string();
-            nsParent = [NSString stringWithUTF8String:parentStr.c_str()];
-
-            std::lock_guard<std::mutex> lock(parentCacheMutex);
-            parentCache[e.path.string()] = parentStr;
-        }
-
+    bus.subscribe<chisel::FileAnalyzeCompleteEvent>([weakSelf](const chisel::FileAnalyzeCompleteEvent& e) {
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onAnalyzeComplete) {
-            strongSelf.onAnalyzeComplete(nsPath, extracted, numChildren, nsParent);
+            strongSelf.onAnalyzeComplete(NSStringFromPath(e.path), e.extracted ? YES : NO,
+                                         static_cast<NSInteger>(e.num_children), NSStringFromPath(e.parent_container));
         }
     });
 
+    // a container whose extraction failed with no fallback: without this it would sit
+    // at whatever status .analyzeStart last set, forever
     bus.subscribe<chisel::FileAnalyzeErrorEvent>([weakSelf](const chisel::FileAnalyzeErrorEvent& e) {
-        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-        NSString* nsError = [NSString stringWithUTF8String:e.error_message.c_str()];
-
-        // Phase 1 (analysis) errors: a pure container (can_recompress() == false) whose
-        // extraction failed with no fallback - without this, the file would silently
-        // vanish (stuck at whatever status .analyzeStart last set, forever). Always
-        // refers to the container itself; chisel doesn't attach parent_container/is_container here.
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onError) {
-            strongSelf.onError(nsPath, nsError, nil, NO);
+            strongSelf.onError(NSStringFromPath(e.path), NSStringFromText(e.error_message), NSStringFromPath(e.parent_container), NO);
         }
     });
 
-    bus.subscribe<chisel::ContainerFinalizeStartEvent>([weakSelf](const chisel::ContainerFinalizeStartEvent& e) {
-        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-        
+    bus.subscribe<chisel::FileAnalyzeSkippedEvent>([weakSelf](const chisel::FileAnalyzeSkippedEvent& e) {
         ChiselWrapper* strongSelf = weakSelf;
-        if (strongSelf && strongSelf.onFinalizeStart) {
-            strongSelf.onFinalizeStart(nsPath);
+        if (strongSelf && strongSelf.onSkipped) {
+            strongSelf.onSkipped(NSStringFromPath(e.path), ToChiselSkipReason(e.reason), NSStringFromText(e.message),
+                                 NSStringFromPath(e.parent_container), NO);
         }
     });
 
     bus.subscribe<chisel::FileProcessStartEvent>([weakSelf](const chisel::FileProcessStartEvent& e) {
-        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-        NSString* nsParent = nil;
-        if (e.parent_container) {
-            nsParent = [NSString stringWithUTF8String:e.parent_container->string().c_str()];
-        }
-        BOOL isContainer = e.is_container ? YES : NO;
-
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onStart) {
-            strongSelf.onStart(nsPath, nsParent, isContainer);
+            strongSelf.onStart(NSStringFromPath(e.path), NSStringFromPath(e.parent_container), e.is_container ? YES : NO);
         }
     });
-    
+
     bus.subscribe<chisel::FileProcessCompleteEvent>([weakSelf](const chisel::FileProcessCompleteEvent& e) {
-        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-        uint64_t origSize = static_cast<uint64_t>(e.original_size);
-        uint64_t finalSize = static_cast<uint64_t>(e.new_size);
-        BOOL replaced = e.replaced ? YES : NO;
-
-        NSString* nsParent = nil;
-        if (e.parent_container) {
-            nsParent = [NSString stringWithUTF8String:e.parent_container->string().c_str()];
-        }
-        BOOL isContainer = e.is_container ? YES : NO;
-
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onFinish) {
-            strongSelf.onFinish(nsPath, origSize, finalSize, replaced, nsParent, isContainer);
+            strongSelf.onFinish(NSStringFromPath(e.path), static_cast<uint64_t>(e.original_size), static_cast<uint64_t>(e.new_size),
+                                e.replaced ? YES : NO, NSStringFromPath(e.parent_container), e.is_container ? YES : NO);
         }
     });
-    
-    bus.subscribe<chisel::FileProcessSkippedEvent>([weakSelf, cachedParent](const chisel::FileProcessSkippedEvent& e) {
-        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-        NSString* nsReason = [NSString stringWithUTF8String:e.reason.c_str()];
-        NSString* nsParent = cachedParent(e.path);
-        BOOL isContainer = e.is_container ? YES : NO;
 
+    bus.subscribe<chisel::FileProcessSkippedEvent>([weakSelf](const chisel::FileProcessSkippedEvent& e) {
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onSkipped) {
-            strongSelf.onSkipped(nsPath, nsReason, nsParent, isContainer, NO);
+            strongSelf.onSkipped(NSStringFromPath(e.path), ToChiselSkipReason(e.reason), NSStringFromText(e.message),
+                                 NSStringFromPath(e.parent_container), e.is_container ? YES : NO);
         }
     });
 
-    bus.subscribe<chisel::FileProcessErrorEvent>([weakSelf, cachedParent](const chisel::FileProcessErrorEvent& e) {
-        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-        NSString* nsError = [NSString stringWithUTF8String:e.error_message.c_str()];
-        NSString* nsParent = cachedParent(e.path);
-        BOOL isContainer = e.is_container ? YES : NO;
-
+    bus.subscribe<chisel::FileProcessErrorEvent>([weakSelf](const chisel::FileProcessErrorEvent& e) {
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onError) {
-            strongSelf.onError(nsPath, nsError, nsParent, isContainer);
+            strongSelf.onError(NSStringFromPath(e.path), NSStringFromText(e.error_message), NSStringFromPath(e.parent_container),
+                               e.is_container ? YES : NO);
         }
     });
 
-    bus.subscribe<chisel::FileAnalyzeSkippedEvent>([weakSelf, cachedParent](const chisel::FileAnalyzeSkippedEvent& e) {
-        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-        NSString* nsReason = [NSString stringWithUTF8String:e.reason.c_str()];
-        BOOL isSigned = e.is_signed ? YES : NO;
-
-        // a phase 1 skip takes the place of FileAnalyzeComplete, so the cache only knows the
-        // parent when chisel publishes this from phase 2 (no processor found at that point)
-        NSString* nsParent = cachedParent(e.path);
-
+    bus.subscribe<chisel::ContainerFinalizeStartEvent>([weakSelf](const chisel::ContainerFinalizeStartEvent& e) {
         ChiselWrapper* strongSelf = weakSelf;
-        if (strongSelf && strongSelf.onSkipped) {
-            strongSelf.onSkipped(nsPath, nsReason, nsParent, NO, isSigned);
+        if (strongSelf && strongSelf.onFinalizeStart) {
+            strongSelf.onFinalizeStart(NSStringFromPath(e.path));
         }
     });
 
-    
-    bus.subscribe<chisel::ContainerFinalizeErrorEvent>([weakSelf](const chisel::ContainerFinalizeErrorEvent& e) {
-        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-        NSString* nsError = [NSString stringWithUTF8String:e.error_message.c_str()];
-
-        // container finalization (Phase 3) is always the container's own file; it has no parent_container/is_container fields
-        ChiselWrapper* strongSelf = weakSelf;
-        if (strongSelf && strongSelf.onError) {
-            strongSelf.onError(nsPath, nsError, nil, NO);
-        }
-    });
-
+    // a container's rebuild outcome is its final result, never its own stream's (isContainer stays NO)
     bus.subscribe<chisel::ContainerFinalizeCompleteEvent>([weakSelf](const chisel::ContainerFinalizeCompleteEvent& e) {
-        NSString* nsPath = [NSString stringWithUTF8String:e.path.c_str()];
-        uint64_t origSize = static_cast<uint64_t>(e.original_size);
-        uint64_t finalSize = static_cast<uint64_t>(e.final_size);
-        BOOL replaced = e.replaced ? YES : NO;
-
         ChiselWrapper* strongSelf = weakSelf;
         if (strongSelf && strongSelf.onFinish) {
-            strongSelf.onFinish(nsPath, origSize, finalSize, replaced, nil, NO);
+            strongSelf.onFinish(NSStringFromPath(e.path), static_cast<uint64_t>(e.original_size), static_cast<uint64_t>(e.final_size),
+                                e.replaced ? YES : NO, NSStringFromPath(e.parent_container), NO);
         }
     });
-    
+
+    bus.subscribe<chisel::ContainerFinalizeErrorEvent>([weakSelf](const chisel::ContainerFinalizeErrorEvent& e) {
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onError) {
+            strongSelf.onError(NSStringFromPath(e.path), NSStringFromText(e.error_message), NSStringFromPath(e.parent_container), NO);
+        }
+    });
+
+    bus.subscribe<chisel::ContainerFinalizeSkippedEvent>([weakSelf](const chisel::ContainerFinalizeSkippedEvent& e) {
+        ChiselWrapper* strongSelf = weakSelf;
+        if (strongSelf && strongSelf.onSkipped) {
+            strongSelf.onSkipped(NSStringFromPath(e.path), ToChiselSkipReason(e.reason), NSStringFromText(e.message),
+                                 NSStringFromPath(e.parent_container), NO);
+        }
+    });
+
     std::vector<std::filesystem::path> inputs;
     inputs.reserve(filePaths.count);
     for (NSString* path in filePaths) {

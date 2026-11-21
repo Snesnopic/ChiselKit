@@ -5,6 +5,19 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+typedef NS_ENUM(NSInteger, ChiselSkipReason) {
+    ChiselSkipReasonJunk,
+    ChiselSkipReasonEmpty,
+    ChiselSkipReasonUnsupported,
+    ChiselSkipReasonSigned,
+    ChiselSkipReasonNestingTooDeep,
+    ChiselSkipReasonNothingToDo,
+    ChiselSkipReasonNoImprovement,
+    ChiselSkipReasonInterrupted,
+    ChiselSkipReasonReadOnly,
+    ChiselSkipReasonChangedDuringRun,
+};
+
 @interface ChiselArchiveNode : NSObject
 @property (nonatomic, copy) NSString *name;
 @property (nonatomic, copy) NSString *mimeType;
@@ -20,7 +33,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) void (^onStart)(NSString *path, NSString * _Nullable parentContainer, BOOL isContainer);
 @property (nonatomic, copy, nullable) void (^onFinish)(NSString *path, uint64_t sizeBefore, uint64_t sizeAfter, BOOL replaced, NSString * _Nullable parentContainer, BOOL isContainer);
 @property (nonatomic, copy, nullable) void (^onError)(NSString *path, NSString *error, NSString * _Nullable parentContainer, BOOL isContainer);
-@property (nonatomic, copy, nullable) void (^onSkipped)(NSString *path, NSString *reason, NSString * _Nullable parentContainer, BOOL isContainer, BOOL isSigned);
+@property (nonatomic, copy, nullable) void (^onSkipped)(NSString *path, ChiselSkipReason reason, NSString *message, NSString * _Nullable parentContainer, BOOL isContainer);
 @property (nonatomic, copy, nullable) void (^onLog)(NSString *tag, NSString *message, NSString *level);
 
 - (void)setOptionsWithIterations:(uint32_t)iterations
