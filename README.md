@@ -14,6 +14,7 @@ The package exposes the `Chisel` actor, which strictly isolates the state of the
 ## Quick Start
 
 ```swift
+import Foundation
 import ChiselKit
 
 // Initialize the Chisel actor
@@ -27,22 +28,32 @@ let filesToProcess = [URL(fileURLWithPath: "/path/to/archive.zip")]
 // Consume the event stream
 for await event in await chisel.process(files: filesToProcess) {
     switch event {
-    case .start(let path):
+    case .start(let path, _, _):
         print("Processing started: \(path)")
-        
-    case .finish(let path, let before, let after, let replaced):
+
+    // A mixed container (e.g. a FLAC with a cover) first reports its own stream with isContainer == true,
+    // then its rebuild with isContainer == false: only the latter is its final result
+    case .finish(let path, let before, let after, _, _, let isContainer) where !isContainer:
         let ratio = (Double(after) / Double(before)) * 100
         print("Finished \(path): \(String(format: "%.2f", ratio))% of original size")
-        
-    case .error(let path, let message):
+
+    case .error(let path, let message, _, _):
         print("Error processing \(path): \(message)")
-        
-    case .skipped(let path, let reason):
-        print("Skipped \(path): \(reason)")
-        
+
+    case .skipped(let path, let reason, let message, _, _):
+        print("Skipped \(path) (\(reason)): \(message)")
+
     default:
-        // Handle other events like .analyzeStart, .log
+        // Handle other events like .analyzeStart, .analyzeComplete, .finalizeStart, .log
         break
     }
 }
 ```
+
+## Events
+
+- Files found inside containers (archives, documents, audio covers) get their own events, and `parentContainer` names the container each one came from. A container's `.analyzeComplete` arrives before any event of the files inside it.
+- `.skipped` carries a `SkipReason` (`junk`, `empty`, `unsupported`, `signed`, `nestingTooDeep`, `nothingToDo`, `noImprovement`, `interrupted`, `readOnly`, `changedDuringRun`) and a human-readable `message`.
+- Without an output directory files are replaced in place: an input that can't be written, or whose folder can't, is skipped as `readOnly`, and one that something else changes during the run as `changedDuringRun`.
+- After `stop()`, every file that was running or waiting to be recompressed reports `.skipped` with reason `interrupted`. Files still waiting to be analyzed get no event.
+- The callbacks are rebound on every `process(files:)` call, so two runs at the same time need two `Chisel` instances.
